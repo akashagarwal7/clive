@@ -13,24 +13,50 @@ struct UsageInfo {
     }
 }
 
+enum UsageError {
+    case executableNotFound(path: String)
+    case launchFailed(error: String)
+
+    var message: String {
+        switch self {
+        case .executableNotFound(let path):
+            return "Claude not found at: \(path)"
+        case .launchFailed(let error):
+            return "Failed to launch Claude: \(error)"
+        }
+    }
+}
+
 class UsageManager {
     private var refreshTimer: Timer?
     private let onUpdate: (UsageInfo?) -> Void
+    private let onError: (UsageError?) -> Void
     private var process: Process?
     private var outputPipe: Pipe?
     private var timeoutTimer: Timer?
     private var isRefreshing = false
-    private var settingsCancellable: AnyCancellable?
+    private var settingsCancellables = Set<AnyCancellable>()
 
     private let timeout: TimeInterval = 30
 
-    init(onUpdate: @escaping (UsageInfo?) -> Void) {
+    init(onUpdate: @escaping (UsageInfo?) -> Void, onError: @escaping (UsageError?) -> Void) {
         self.onUpdate = onUpdate
+        self.onError = onError
 
         // Listen for refresh interval changes
-        settingsCancellable = SettingsManager.shared.$refreshInterval.sink { [weak self] _ in
+        SettingsManager.shared.$refreshInterval.sink { [weak self] _ in
             self?.restartTimer()
-        }
+        }.store(in: &settingsCancellables)
+
+        // Listen for claude path changes and refresh when changed
+        SettingsManager.shared.$claudePath.sink { [weak self] _ in
+            self?.refreshNow()
+        }.store(in: &settingsCancellables)
+    }
+
+    private func checkExecutableExists() -> Bool {
+        let path = SettingsManager.shared.claudePath
+        return FileManager.default.isExecutableFile(atPath: path)
     }
 
     func startPolling() {
@@ -68,6 +94,18 @@ class UsageManager {
     private func performRefresh() {
         isRefreshing = true
 
+        let claudePath = SettingsManager.shared.claudePath
+
+        // Check if executable exists
+        guard checkExecutableExists() else {
+            isRefreshing = false
+            onError(.executableNotFound(path: claudePath))
+            return
+        }
+
+        // Clear any previous error on successful check
+        onError(nil)
+
         let proc = Process()
         let pipe = Pipe()
 
@@ -76,12 +114,15 @@ class UsageManager {
         try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
         proc.currentDirectoryURL = tempDir
 
+        // Get directory containing claude for PATH
+        let claudeDir = (claudePath as NSString).deletingLastPathComponent
+
         // Write expect script to temp directory
         let expectScript = """
             #!/usr/bin/expect -f
             log_user 1
             set timeout 25
-            spawn /opt/homebrew/bin/claude /usage
+            spawn \(claudePath) /usage
 
             # Handle trust dialog if it appears, then read output
             expect {
@@ -112,9 +153,9 @@ class UsageManager {
         proc.standardOutput = pipe
         proc.standardError = pipe
 
-        // Minimal environment
+        // Minimal environment - include claude's directory in PATH
         var env: [String: String] = [:]
-        env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+        env["PATH"] = "\(claudeDir):/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
         env["HOME"] = ProcessInfo.processInfo.environment["HOME"] ?? ""
         env["USER"] = ProcessInfo.processInfo.environment["USER"] ?? ""
         env["TERM"] = "dumb"
@@ -172,7 +213,7 @@ class UsageManager {
             try proc.run()
         } catch {
             isRefreshing = false
-            onUpdate(nil)
+            onError(.launchFailed(error: error.localizedDescription))
         }
     }
 

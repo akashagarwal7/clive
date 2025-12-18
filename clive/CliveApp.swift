@@ -17,19 +17,30 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var usageManager: UsageManager?
     var settingsWindow: NSWindow?
     var currentUsage: UsageInfo?
+    var currentError: UsageError?
     var settingsCancellable: AnyCancellable?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMenuBar()
-        usageManager = UsageManager { [weak self] usage in
-            self?.currentUsage = usage
-            self?.updateMenuBar(with: usage)
-        }
+        usageManager = UsageManager(
+            onUpdate: { [weak self] usage in
+                self?.currentUsage = usage
+                self?.updateMenuBar(with: usage)
+            },
+            onError: { [weak self] error in
+                self?.currentError = error
+                self?.updateMenuBarForError(error)
+            }
+        )
         usageManager?.startPolling()
 
         // Listen for settings changes
         settingsCancellable = SettingsManager.shared.$displayMode.sink { [weak self] _ in
-            self?.updateMenuBar(with: self?.currentUsage)
+            if self?.currentError != nil {
+                self?.updateMenuBarForError(self?.currentError)
+            } else {
+                self?.updateMenuBar(with: self?.currentUsage)
+            }
         }
     }
 
@@ -49,6 +60,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func setupMenu() {
         let menu = NSMenu()
+
+        let errorItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        errorItem.isEnabled = false
+        errorItem.tag = 99
+        errorItem.isHidden = true
+        menu.addItem(errorItem)
 
         let sessionItem = NSMenuItem(title: "Session: --", action: nil, keyEquivalent: "")
         sessionItem.isEnabled = false
@@ -129,11 +146,75 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return Double(numStr)
     }
 
+    private func updateMenuBarForError(_ error: UsageError?) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, let button = self.statusItem?.button else { return }
+
+            // Update error menu item
+            if let menu = self.statusItem?.menu, let errorItem = menu.item(withTag: 99) {
+                if let error = error {
+                    errorItem.title = error.message
+                    errorItem.isHidden = false
+                } else {
+                    errorItem.title = ""
+                    errorItem.isHidden = true
+                }
+            }
+
+            if error != nil {
+                // Show error state with warning icon
+                let image = self.createErrorIcon()
+                image.isTemplate = false
+                button.image = image
+                button.title = "CC:"
+                button.imagePosition = .imageRight
+
+                // Also clear the usage display items
+                if let menu = self.statusItem?.menu,
+                   let sessionItem = menu.item(withTag: 100),
+                   let weeklyItem = menu.item(withTag: 101) {
+                    sessionItem.title = "Session: --"
+                    weeklyItem.title = "Weekly: --"
+                }
+            } else {
+                // Error cleared, restore normal display
+                self.currentError = nil
+                self.updateMenuBar(with: self.currentUsage)
+            }
+        }
+    }
+
+    private func createErrorIcon() -> NSImage {
+        let size = NSSize(width: 18, height: 18)
+        let image = NSImage(size: size, flipped: false) { rect in
+            // Draw warning triangle with exclamation mark
+            let warningColor = NSColor(red: 1.0, green: 0.3, blue: 0.3, alpha: 1.0)
+
+            // Use SF Symbol if available
+            if let symbolImage = NSImage(systemSymbolName: "exclamationmark.triangle.fill", accessibilityDescription: "Error") {
+                let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .medium)
+                let configuredImage = symbolImage.withSymbolConfiguration(config)
+
+                // Draw with tint color
+                warningColor.set()
+                let imageRect = NSRect(x: (rect.width - 16) / 2, y: (rect.height - 16) / 2, width: 16, height: 16)
+                configuredImage?.draw(in: imageRect, from: .zero, operation: .sourceOver, fraction: 1.0)
+
+                // Apply color tint by drawing over
+                NSGraphicsContext.current?.cgContext.setBlendMode(.sourceAtop)
+                warningColor.setFill()
+                imageRect.fill()
+            }
+            return true
+        }
+        return image
+    }
+
     @objc func openSettings() {
         if settingsWindow == nil {
             let view = SettingsView()
             settingsWindow = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 280, height: 140),
+                contentRect: NSRect(x: 0, y: 0, width: 400, height: 280),
                 styleMask: [.titled, .closable],
                 backing: .buffered,
                 defer: false

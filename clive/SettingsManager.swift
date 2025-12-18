@@ -31,6 +31,9 @@ class SettingsManager: ObservableObject {
 
     private let displayModeKey = "displayMode"
     private let refreshIntervalKey = "refreshInterval"
+    private let claudePathKey = "claudePath"
+
+    static let defaultClaudePath = "/opt/homebrew/bin/claude"
 
     @Published var displayMode: DisplayMode {
         didSet {
@@ -41,6 +44,12 @@ class SettingsManager: ObservableObject {
     @Published var refreshInterval: RefreshInterval {
         didSet {
             UserDefaults.standard.set(refreshInterval.rawValue, forKey: refreshIntervalKey)
+        }
+    }
+
+    @Published var claudePath: String {
+        didSet {
+            UserDefaults.standard.set(claudePath, forKey: claudePathKey)
         }
     }
 
@@ -57,6 +66,12 @@ class SettingsManager: ObservableObject {
             self.refreshInterval = interval
         } else {
             self.refreshInterval = .fiveMinutes
+        }
+
+        if let savedPath = UserDefaults.standard.string(forKey: claudePathKey), !savedPath.isEmpty {
+            self.claudePath = savedPath
+        } else {
+            self.claudePath = SettingsManager.defaultClaudePath
         }
     }
 }

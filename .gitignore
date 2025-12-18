@@ -30,3 +30,8 @@ Package.resolved
 # Temporary files
 *.swp
 *~
+
+# Claude Code rules (local)
+CLAUDE.md
+*.zip
+generate_icon.swift
