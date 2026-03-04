@@ -33,6 +33,7 @@ class UsageManager {
     private var refreshTimer: Timer?
     private let onUpdate: (UsageInfo?) -> Void
     private let onError: (UsageError?) -> Void
+    private let onEmailUpdate: (String?) -> Void
     private var childPid: pid_t = 0
     private var masterFd: Int32 = -1
     private var timeoutTimer: Timer?
@@ -41,9 +42,10 @@ class UsageManager {
 
     private let timeout: TimeInterval = 30
 
-    init(onUpdate: @escaping (UsageInfo?) -> Void, onError: @escaping (UsageError?) -> Void) {
+    init(onUpdate: @escaping (UsageInfo?) -> Void, onError: @escaping (UsageError?) -> Void, onEmailUpdate: @escaping (String?) -> Void = { _ in }) {
         self.onUpdate = onUpdate
         self.onError = onError
+        self.onEmailUpdate = onEmailUpdate
 
         // Listen for refresh interval changes
         SettingsManager.shared.$refreshInterval.sink { [weak self] _ in
@@ -63,6 +65,7 @@ class UsageManager {
 
     func startPolling() {
         refreshNow()
+        fetchEmail()
         startTimer()
     }
 
@@ -76,6 +79,7 @@ class UsageManager {
 
     func refreshNow() {
         guard !isRefreshing else { return }
+        fetchEmail()
         performRefresh()
     }
 
@@ -90,6 +94,36 @@ class UsageManager {
     private func restartTimer() {
         if refreshTimer != nil {
             startTimer()
+        }
+    }
+
+    func fetchEmail() {
+        let claudePath = SettingsManager.shared.claudePath
+        guard checkExecutableExists() else { return }
+
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: claudePath)
+            process.arguments = ["auth", "status"]
+
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            process.standardError = FileHandle.nullDevice
+
+            do {
+                try process.run()
+                process.waitUntilExit()
+
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                    let email = json["email"] as? String {
+                    DispatchQueue.main.async {
+                        self?.onEmailUpdate(email)
+                    }
+                }
+            } catch {
+                // Silently fail - email display is non-critical
+            }
         }
     }
 

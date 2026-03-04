@@ -30,6 +30,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             onError: { [weak self] error in
                 self?.currentError = error
                 self?.updateMenuBarForError(error)
+            },
+            onEmailUpdate: { [weak self] email in
+                self?.updateEmailMenuItem(email)
             }
         )
         usageManager?.startPolling()
@@ -61,6 +64,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupMenu() {
         let menu = NSMenu()
 
+        let emailItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        emailItem.isEnabled = false
+        emailItem.tag = 102
+        emailItem.isHidden = true
+        menu.addItem(emailItem)
+
         let errorItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
         errorItem.isEnabled = false
         errorItem.tag = 99
@@ -79,6 +88,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Refresh Now", action: #selector(refreshNow), keyEquivalent: "r"))
+        menu.addItem(NSMenuItem(title: "Switch Account...", action: #selector(switchAccount), keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Settings...", action: #selector(openSettings), keyEquivalent: ","))
         menu.addItem(NSMenuItem.separator())
@@ -105,6 +115,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             weeklyItem.title = "Weekly: \(weekly) (resets \(resets))"
         } else {
             weeklyItem.title = "Weekly: \(weekly)"
+        }
+    }
+
+    private func updateEmailMenuItem(_ email: String?) {
+        guard let menu = statusItem?.menu, let emailItem = menu.item(withTag: 102) else { return }
+        if let email = email {
+            emailItem.title = email
+            emailItem.isHidden = false
+        } else {
+            emailItem.isHidden = true
         }
     }
 
@@ -241,6 +261,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         settingsWindow?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    @objc func switchAccount() {
+        let claudePath = SettingsManager.shared.claudePath
+        guard FileManager.default.isExecutableFile(atPath: claudePath) else { return }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: claudePath)
+        process.arguments = ["auth", "login"]
+
+        process.terminationHandler = { [weak self] _ in
+            DispatchQueue.main.async {
+                self?.usageManager?.refreshNow()
+            }
+        }
+
+        do {
+            try process.run()
+        } catch {
+            // Failed to launch
+        }
     }
 
     @objc func refreshNow() {

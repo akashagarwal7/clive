@@ -13,6 +13,8 @@ A macOS menu bar app that displays your [Claude Code](https://docs.anthropic.com
 ## Features
 
 - **Real-time usage tracking** - Monitor your Claude Code session and weekly usage limits
+- **Account display** - Shows the currently logged-in email address in the menu
+- **Switch accounts** - Quickly switch Claude accounts via `claude auth login` from the menu (make sure the right browser profile is focused if you use 2 profiles that are signed into 2 different claude accounts)
 - **Multiple display modes**:
   - Text: Shows percentages directly (e.g., `CC: 45% (32% weekly)`)
   - Pie Charts: Visual representation with two pie charts
@@ -60,8 +62,10 @@ brew upgrade clive
 
 Once running, Clive appears in your menu bar showing your Claude Code usage. Click the icon to see:
 
+- **Logged-in email** - The email address of the current Claude account
 - **Session usage** - Current session percentage and reset time
 - **Weekly usage** - Current week's percentage
+- **Switch Account** - Run `claude auth login` to switch to a different account
 
 Access Settings (⌘,) to configure:
 - Display mode (Text, Pie Charts, or Bar Charts)
@@ -69,7 +73,7 @@ Access Settings (⌘,) to configure:
 
 ## How It Works
 
-Clive periodically runs `claude /usage` to fetch your current usage statistics and displays them in the menu bar. The app parses the output to extract session and weekly usage percentages.
+Clive periodically runs `claude /usage` to fetch your current usage statistics and displays them in the menu bar. The app parses the output to extract session and weekly usage percentages. It also runs `claude auth status` to display the currently logged-in account email.
 No hacking of session tokens etc required :).
 
 ## License
